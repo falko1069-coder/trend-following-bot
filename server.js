@@ -1,12 +1,26 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import mongoose from 'mongoose'; // 🔹 นำเข้า Mongoose สำหรับเชื่อมต่อ Database
 
 const app = express();
 app.use(cors());
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const MONGODB_URI = process.env.MONGODB_URI;
+
+// 🔹 เชื่อมต่อ MongoDB
+mongoose.connect(MONGODB_URI)
+    .then(() => console.log('✅ เชื่อมต่อ MongoDB สำเร็จ!'))
+    .catch(err => console.error('❌ เชื่อมต่อ MongoDB ล้มเหลว:', err));
+
+// 🔹 สร้างโครงสร้างสมุดจดถาวร (Schema) สำหรับจำสถานะหุ้น
+const stockSchema = new mongoose.Schema({
+    symbol: { type: String, unique: true },
+    trend: String // เก็บค่า 'UPTREND' หรือ 'DOWNTREND'
+});
+const Stock = mongoose.model('Stock', stockSchema);
 
 // ตะกร้าหุ้นสายเทคฯ และ ETF ที่เหมาะกับการรันเทรนด์ยาวๆ
 const WATCHLIST = [
@@ -22,9 +36,6 @@ const WATCHLIST = [
     // 🔹 4. สุขภาพ & อุตสาหกรรม (พื้นฐานแกร่ง)
     'CAT', 'JNJ', 'TXN', 'LLY', 'NVO'
 ];
-
-// สมุดจดจำสถานะหุ้น (ป้องกันการแจ้งเตือนสแปม)
-const stockStates = {}; 
 
 let cacheData = {}; 
 let isReady = false; 
@@ -109,7 +120,6 @@ async function getYahooAuth() {
 async function fetchStockDataNative(symbol) {
     let currentPrice = 0, changePercent = 0, prices = [];
     try {
-        // 🎯 [อัปเดตใหม่]: ดึงข้อมูลย้อนหลัง 2 ปี (2y) เพื่อให้มีข้อมูลพอคำนวณเส้น 200 วัน
         const chartUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=2y`;
         const chartRes = await fetch(chartUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
@@ -135,7 +145,6 @@ async function fetchStockDataNative(symbol) {
     let isPass = true;
     let debtRatioStr = "0.0";
 
-    // 🛡️ [ฮาลาล]: ระบบคัดกรองหนี้สินยังคงอยู่ เพื่อความสบายใจในการถือยาว
     try {
         const auth = await getYahooAuth();
         const finUrl = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=financialData,price${auth.crumb ? '&crumb='+auth.crumb : ''}`;
@@ -177,17 +186,20 @@ async function updateAllStocks() {
             const data = await fetchStockDataNative(symbol);
             cacheData[symbol] = data;
             
-            // ตรวจสอบว่ามีข้อมูลกราฟมากพอ (อย่างน้อย 200 วัน)
             if (data.historicalPrices.length >= 200) {
                 const ema50 = calculateEMA(data.historicalPrices, 50);
                 const ema200 = calculateEMA(data.historicalPrices, 200);
                 
                 const currentState = determineTrendState(ema50, ema200);
-                const lastAlertedState = stockStates[symbol];
+                
+                // 🔹 1. ดึงสถานะเทรนด์ล่าสุดจาก Database
+                const savedStock = await Stock.findOne({ symbol: symbol });
+                const previousTrend = savedStock ? savedStock.trend : null;
 
                 if (currentState !== 'UNKNOWN') {
-                    // แจ้งเตือนเมื่อ "สถานะเทรนด์เปลี่ยน" เท่านั้น
-                    if (currentState !== lastAlertedState) {
+                    // 🔹 2. ตรวจสอบเงื่อนไขการแจ้งเตือน (ต้องมีข้อมูลเดิม และ เทรนด์เปลี่ยน)
+                    // (ถ้า previousTrend เป็น null แปลว่ารันครั้งแรก จะไม่แจ้งเตือน เพื่อป้องกันสแปม)
+                    if (previousTrend && currentState !== previousTrend) {
                         let alertTitle = '';
                         if (currentState === 'UPTREND') {
                             alertTitle = '🚀 <b>สัญญาณซื้อต้นรอบ (Golden Cross)</b>\n<i>เส้น EMA 50 ตัดขึ้นเหนือ EMA 200</i>';
@@ -195,11 +207,18 @@ async function updateAllStocks() {
                             alertTitle = '⚠️ <b>สัญญาณขายจบรอบ (Death Cross)</b>\n<i>เส้น EMA 50 ตัดลงใต้ EMA 200</i>';
                         }
 
-                        // เตือนเฉพาะตลาดเปิด และหุ้นนั้นต้องสอบผ่านฮาลาล
                         if (isMarketOpen() && data.isHalal) {
-                            sendTelegramMessage(`${alertTitle}\n\n📌 หุ้น: <b>${symbol}</b>\n💰 ราคาปัจจุบัน: $${data.price}\n📊 EMA 50: $${ema50}\n📈 EMA 200: $${ema200}\n🕌 หนี้สินฮาลาล: ${data.debtRatio}%`);
-                            stockStates[symbol] = currentState; 
+                            await sendTelegramMessage(`${alertTitle}\n\n📌 หุ้น: <b>${symbol}</b>\n💰 ราคาปัจจุบัน: $${data.price}\n📊 EMA 50: $${ema50}\n📈 EMA 200: $${ema200}\n🕌 หหนี้สินฮาลาล: ${data.debtRatio}%`);
                         }
+                    }
+
+                    // 🔹 3. อัปเดตสถานะล่าสุดลง Database เสมอเมื่อค่าเปลี่ยน (หรือสร้างใหม่ถ้ารันครั้งแรก)
+                    if (currentState !== previousTrend) {
+                        await Stock.updateOne(
+                            { symbol: symbol }, 
+                            { $set: { trend: currentState } }, 
+                            { upsert: true }
+                        );
                     }
                 }
             }
@@ -215,7 +234,7 @@ async function updateAllStocks() {
     console.log('✅ สแกนเทรนด์เสร็จสิ้น 100%!');
 }
 
-app.get('/', (req, res) => res.send('🚀 Trend Following Bot ตื่นอยู่เสมอ!'));
+app.get('/', (req, res) => res.send('🚀 Trend Following Bot พร้อมระบบ Database ตื่นอยู่เสมอ!'));
 app.get('/api/stocks', (req, res) => { 
     res.json({ isReady: isReady, data: Object.values(cacheData) }); 
 });
@@ -223,7 +242,7 @@ app.get('/api/stocks', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 พร้อมที่พอร์ต ${PORT}`);
-    sendTelegramMessage('🚀 <b>Trend Following Bot สตาร์ทเครื่องแล้ว!</b>\nระบบกำลังสแกนหากราฟ Golden Cross (รอสักครู่)...');
+    sendTelegramMessage('🚀 <b>Trend Following Bot สตาร์ทเครื่องแล้ว!</b>\nระบบเชื่อมต่อ Database สำเร็จและกำลังสแกนกราฟ (รอสักครู่)...');
     updateAllStocks(); 
     setInterval(updateAllStocks, 15 * 60 * 1000); 
 });
