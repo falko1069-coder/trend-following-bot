@@ -1,10 +1,16 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import mongoose from 'mongoose'; // 🔹 นำเข้า Mongoose สำหรับเชื่อมต่อ Database
+import mongoose from 'mongoose';
+import cron from 'node-cron'; // 🔹 นำเข้าระบบตั้งเวลาสำหรับ Health Check
 
 const app = express();
-app.use(cors());
+
+// 🔹 ล็อคความปลอดภัยด้วย CORS (ให้เฉพาะ Vercel ของคุณเท่านั้นที่ดึงข้อมูลได้)
+app.use(cors({
+    origin: 'https://trend-dashboard-liard.vercel.app'
+}));
+app.use(express.json());
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -24,16 +30,13 @@ const Stock = mongoose.model('Stock', stockSchema);
 
 // ตะกร้าหุ้นสายเทคฯ และ ETF ที่เหมาะกับการรันเทรนด์ยาวๆ
 const WATCHLIST = [
-    // 🔹 1. กองทุนอิสลาม (Islamic ETFs - ปลอดภัย 100%)
+    // 1. กองทุนอิสลาม (Islamic ETFs - ปลอดภัย 100%)
     'HLAL', 'SPUS', 'SPSK', 'UMMA',
-    
-    // 🔹 2. เมกะเทรนด์ AI & Hardware (ผ่านเกณฑ์ AAOIFI)
+    // 2. เมกะเทรนด์ AI & Hardware (ผ่านเกณฑ์ AAOIFI)
     'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AVGO', 'TSLA', 'AMD', 'ASML',
-    
-    // 🔹 3. ซอฟต์แวร์ระดับองค์กร & เติบโตสูง (รายได้สะอาด)
+    // 3. ซอฟต์แวร์ระดับองค์กร & เติบโตสูง (รายได้สะอาด)
     'ADBE', 'CRM', 'CSCO', 'PCOR', 'CRWD', 'NOW', 'SNPS', 'MELI',
-    
-    // 🔹 4. สุขภาพ & อุตสาหกรรม (พื้นฐานแกร่ง)
+    // 4. สุขภาพ & อุตสาหกรรม (พื้นฐานแกร่ง)
     'CAT', 'JNJ', 'TXN', 'LLY', 'NVO'
 ];
 
@@ -78,7 +81,7 @@ function isMarketOpen() {
     return (time >= 14.5 && time < 20.0);
 }
 
-// 🎯 [ระบบสมองกลใหม่]: จับเทรนด์รอบใหญ่ด้วย EMA 50 และ EMA 200
+// 🎯 จับเทรนด์รอบใหญ่ด้วย EMA 50 และ EMA 200
 function determineTrendState(ema50, ema200) {
     if (ema50 === 0 || ema200 === 0) return 'UNKNOWN';
     if (ema50 > ema200) return 'UPTREND';    // ขาขึ้น (Golden Cross)
@@ -86,7 +89,7 @@ function determineTrendState(ema50, ema200) {
     return 'UNKNOWN';
 }
 
-// 🔑 ฟังก์ชันเจาะเกราะ Yahoo (คงไว้เหมือนเดิม เพราะเสถียรมาก)
+// 🔑 ฟังก์ชันเจาะเกราะ Yahoo
 async function getYahooAuth() {
     if (yahooCookie && yahooCrumb) return { cookie: yahooCookie, crumb: yahooCrumb };
     try {
@@ -192,13 +195,12 @@ async function updateAllStocks() {
                 
                 const currentState = determineTrendState(ema50, ema200);
                 
-                // 🔹 1. ดึงสถานะเทรนด์ล่าสุดจาก Database
+                // 🔹 ดึงสถานะเทรนด์ล่าสุดจาก Database
                 const savedStock = await Stock.findOne({ symbol: symbol });
                 const previousTrend = savedStock ? savedStock.trend : null;
 
                 if (currentState !== 'UNKNOWN') {
-                    // 🔹 2. ตรวจสอบเงื่อนไขการแจ้งเตือน (ต้องมีข้อมูลเดิม และ เทรนด์เปลี่ยน)
-                    // (ถ้า previousTrend เป็น null แปลว่ารันครั้งแรก จะไม่แจ้งเตือน เพื่อป้องกันสแปม)
+                    // 🔹 ตรวจสอบเงื่อนไขการแจ้งเตือนรอบ (เทรนด์เปลี่ยน)
                     if (previousTrend && currentState !== previousTrend) {
                         let alertTitle = '';
                         if (currentState === 'UPTREND') {
@@ -208,11 +210,11 @@ async function updateAllStocks() {
                         }
 
                         if (isMarketOpen() && data.isHalal) {
-                            await sendTelegramMessage(`${alertTitle}\n\n📌 หุ้น: <b>${symbol}</b>\n💰 ราคาปัจจุบัน: $${data.price}\n📊 EMA 50: $${ema50}\n📈 EMA 200: $${ema200}\n🕌 หหนี้สินฮาลาล: ${data.debtRatio}%`);
+                            await sendTelegramMessage(`${alertTitle}\n\n📌 หุ้น: <b>${symbol}</b>\n💰 ราคาปัจจุบัน: $${data.price}\n📊 EMA 50: $${ema50}\n📈 EMA 200: $${ema200}\n🕌 หนี้สิน: ${data.debtRatio}%`);
                         }
                     }
 
-                    // 🔹 3. อัปเดตสถานะล่าสุดลง Database เสมอเมื่อค่าเปลี่ยน (หรือสร้างใหม่ถ้ารันครั้งแรก)
+                    // 🔹 อัปเดตสถานะล่าสุดลง Database เสมอเมื่อค่าเปลี่ยน
                     if (currentState !== previousTrend) {
                         await Stock.updateOne(
                             { symbol: symbol }, 
@@ -233,6 +235,16 @@ async function updateAllStocks() {
     isReady = true;
     console.log('✅ สแกนเทรนด์เสร็จสิ้น 100%!');
 }
+
+// 🚑 1. ระบบ Health Check รายงานตัวตอน 21:30 น.
+cron.schedule('30 21 * * *', () => {
+    const message = "✅ <b>[Health Check]</b> บอท Trend Following ยังตื่นอยู่ครับ!\nเตรียมพร้อมสแกนตลาดอเมริกา 🇺🇸 📈";
+    sendTelegramMessage(message);
+    console.log("Sent Health Check at 21:30");
+}, {
+    scheduled: true,
+    timezone: "Asia/Bangkok"
+});
 
 app.get('/', (req, res) => res.send('🚀 Trend Following Bot พร้อมระบบ Database ตื่นอยู่เสมอ!'));
 app.get('/api/stocks', (req, res) => { 
