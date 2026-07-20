@@ -28,7 +28,8 @@ mongoose.connect(MONGODB_URI)
 // 🔹 โครงสร้างสมุดจดถาวร (Schema) สำหรับจำสถานะหุ้น
 const stockSchema = new mongoose.Schema({
     symbol: { type: String, unique: true },
-    trend: String
+    trend: String,
+    aiSummary: String // 🌟 [เพิ่มใหม่] ช่องเก็บข้อความ AI สำหรับส่งไปหน้าเว็บ
 });
 const Stock = mongoose.model('Stock', stockSchema);
 
@@ -231,7 +232,6 @@ async function updateAllStocks() {
         const symbol = WATCHLIST[i];
         try {
             const data = await fetchStockDataNative(symbol);
-            cacheData[symbol] = data;
             
             if (data.historicalPrices.length >= 200) {
                 const ema50 = calculateEMA(data.historicalPrices, 50);
@@ -242,6 +242,9 @@ async function updateAllStocks() {
                 // 🔹 ดึงสถานะเทรนด์ล่าสุดจาก Database
                 const savedStock = await Stock.findOne({ symbol: symbol });
                 const previousTrend = savedStock ? savedStock.trend : null;
+                
+                // 🌟 [เพิ่มใหม่] ดึงข้อความ AI ตัวเก่ามาเตรียมไว้ก่อน
+                let currentAiSummary = savedStock && savedStock.aiSummary ? savedStock.aiSummary : "";
 
                 if (currentState !== 'UNKNOWN') {
                     // 🔹 ตรวจสอบเงื่อนไขการแจ้งเตือนรอบ (เทรนด์เปลี่ยน)
@@ -256,7 +259,9 @@ async function updateAllStocks() {
                         if (isMarketOpen() && data.isHalal) {
                             // 🤖 เรียก AI วิเคราะห์ข่าวสารเบื้องหลัง
                             console.log(`🤖 กำลังให้ AI อ่านข่าวและวิเคราะห์หุ้น ${symbol}...`);
-                            const aiAnalysis = await getAIAnalysisAndNews(symbol, currentState, data.price, ema50, ema200);
+                            
+                            // 🌟 [เพิ่มใหม่] รับข้อความ AI ตัวใหม่ล่าสุด
+                            currentAiSummary = await getAIAnalysisAndNews(symbol, currentState, data.price, ema50, ema200);
 
                             const fullMessage = `${alertTitle}\n\n` +
                                 `📌 หุ้น: <b>${symbol}</b> (${data.name})\n` +
@@ -264,23 +269,27 @@ async function updateAllStocks() {
                                 `📊 EMA 50: $${ema50}\n` +
                                 `📈 EMA 200: $${ema200}\n` +
                                 `🕌 หนี้สิน: ${data.debtRatio}%\n\n` +
-                                `🧠 <b>บทวิเคราะห์ข่าวโดย AI:</b>\n<i>${aiAnalysis}</i>`;
+                                `🧠 <b>บทวิเคราะห์ข่าวโดย AI:</b>\n<i>${currentAiSummary}</i>`;
 
                             await sendTelegramMessage(fullMessage);
                         }
                     }
 
-                    // 🔹 อัปเดตสถานะล่าสุดลง Database เสมอเมื่อค่าเปลี่ยน
-                    if (currentState !== previousTrend) {
+                    // 🌟 [ปรับปรุง] อัปเดตสถานะล่าสุด และบันทึกข้อความ AI ลง Database เสมอเมื่อค่าเปลี่ยน
+                    if (currentState !== previousTrend || currentAiSummary !== (savedStock ? savedStock.aiSummary : "")) {
                         await Stock.updateOne(
                             { symbol: symbol }, 
-                            { $set: { trend: currentState } }, 
+                            { $set: { trend: currentState, aiSummary: currentAiSummary } }, 
                             { upsert: true }
                         );
                     }
                 }
+                
+                // 🌟 [เพิ่มใหม่] แนบข้อความ AI ใส่เข้าไปใน data เพื่อเตรียมส่งต่อให้หน้าเว็บ
+                data.aiSummary = currentAiSummary;
             }
             
+            cacheData[symbol] = data; // อัปเดตลงแคช
             initProgress = i + 1;
             console.log(`✅ อัปเดต ${symbol} สำเร็จ (${initProgress}/${WATCHLIST.length})`);
         } catch (err) {
