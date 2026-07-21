@@ -14,11 +14,12 @@ app.use(cors({
 }));
 app.use(express.json());
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const MONGODB_URI = process.env.MONGODB_URI;
-const ALPHA_VANTAGE_API_KEY = process.env.ALPHA_VANTAGE_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+// 🛡️ [อัปเดตความปลอดภัย] ใส่ .trim() อุดช่องโหว่ช่องว่างล่องหน ป้องกันเซิร์ฟเวอร์พัง
+const TELEGRAM_TOKEN = (process.env.TELEGRAM_TOKEN || '').trim();
+const TELEGRAM_CHAT_ID = (process.env.TELEGRAM_CHAT_ID || '').trim();
+const MONGODB_URI = (process.env.MONGODB_URI || '').trim();
+const ALPHA_VANTAGE_API_KEY = (process.env.ALPHA_VANTAGE_API_KEY || '').trim();
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
 
 // 🔹 เชื่อมต่อ MongoDB
 mongoose.connect(MONGODB_URI)
