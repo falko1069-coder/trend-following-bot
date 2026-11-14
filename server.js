@@ -30,16 +30,21 @@ mongoose.connect(MONGODB_URI)
 const stockSchema = new mongoose.Schema({
     symbol: { type: String, unique: true },
     trend: String,
-    aiSummary: String // 🌟 [เพิ่มใหม่] ช่องเก็บข้อความ AI สำหรับส่งไปหน้าเว็บ
+    aiSummary: String // 🌟 ช่องเก็บข้อความ AI สำหรับส่งไปหน้าเว็บ
 });
 const Stock = mongoose.model('Stock', stockSchema);
 
-// ตะกร้าหุ้นสายเทคฯ และ ETF
+// 🌎 ตะกร้าหุ้นสายรันเทรนด์ (Trend Following): หุ้นสหรัฐฯ (US) + หุ้นไทย (TH .BK)
 const WATCHLIST = [
+    // 🇺🇸 หุ้นอเมริกาและ ETF ฮาลาล (25 ตัวเดิมครบถ้วน)
     'HLAL', 'SPUS', 'SPSK', 'UMMA',
     'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AVGO', 'TSLA', 'AMD', 'ASML',
     'ADBE', 'CRM', 'CSCO', 'PCOR', 'CRWD', 'NOW', 'SNPS', 'MELI',
-    'CAT', 'JNJ', 'TXN', 'LLY', 'NVO'
+    'CAT', 'JNJ', 'TXN', 'LLY', 'NVO',
+    // 🇹🇭 หุ้นไทยสายวิ่งตามเทรนด์และพื้นฐานแกร่ง (11 ตัว)
+    'DELTA.BK', 'HANA.BK', 'KCE.BK', 'ADVANC.BK',
+    'BH.BK', 'BDMS.BK', 'MEGA.BK',
+    'PTTEP.BK', 'AOT.BK', 'HMPRO.BK', 'GULF.BK'
 ];
 
 let cacheData = {}; 
@@ -50,6 +55,11 @@ let yahooCrumb = '';
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// เช็คว่าเป็นหุ้นไทยหรือไม่
+function isThaiStock(symbol) {
+    return Boolean(symbol && symbol.toUpperCase().endsWith('.BK'));
+}
+
 async function sendTelegramMessage(text) {
     if (!TELEGRAM_TOKEN) return; 
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`;
@@ -59,16 +69,21 @@ async function sendTelegramMessage(text) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: text, parse_mode: 'HTML' })
         });
-    } catch (error) { console.error('❌ ส่งข้อความพลาด:', error.message); }
+    } catch (error) { 
+        console.error('❌ ส่งข้อความพลาด:', error.message); 
+    }
 }
 
-// 🧠 ฟังก์ชันดึงข่าว + AI วิเคราะห์เหตุผล
-async function getAIAnalysisAndNews(symbol, currentState, price, ema50, ema200) {
+// 🧠 ฟังก์ชันดึงข่าว + AI วิเคราะห์เหตุผล (รองรับทั้งหุ้น US และ TH)
+async function getAIAnalysisAndNews(symbol, name, currentState, price, ema50, ema200) {
     let aiSummary = "ไม่มีข้อมูลวิเคราะห์ข่าวเพิ่มเติมในขณะนี้";
     let newsText = "";
+    const isTH = isThaiStock(symbol);
+    const curr = isTH ? '฿' : '$';
+    const marketName = isTH ? 'ตลาดหลักทรัพย์แห่งประเทศไทย (SET)' : 'ตลาดหุ้นสหรัฐอเมริกา (US)';
 
-    // 1. ดึงข่าวสารล่าสุดจาก Alpha Vantage
-    if (ALPHA_VANTAGE_API_KEY) {
+    // 1. ดึงข่าวสารล่าสุดจาก Alpha Vantage (สำหรับหุ้นที่มีในระบบข่าว)
+    if (ALPHA_VANTAGE_API_KEY && !isTH) {
         try {
             const newsUrl = `https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers=${symbol}&limit=3&apikey=${ALPHA_VANTAGE_API_KEY}`;
             const res = await axios.get(newsUrl, { timeout: 5000 });
@@ -81,25 +96,25 @@ async function getAIAnalysisAndNews(symbol, currentState, price, ema50, ema200) 
         }
     }
 
-    // 2. ให้ Gemini อ่านข่าวและสรุปสั้นๆ
+    // 2. ให้ Gemini อ่านข่าว/ข้อมูลเทรนด์และสรุปสั้นๆ
     if (GEMINI_API_KEY) {
         try {
             const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
             const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
             const prompt = `
-คุณคือนักวิเคราะห์การเงินสาย Trend Following โปรดวิเคราะห์สถานการณ์หุ้น ${symbol}:
-- ราคาปัจจุบัน: $${price}
-- สัญญาณเทรนด์: ${currentState === 'UPTREND' ? 'Golden Cross (ขาขึ้น)' : 'Death Cross (ขาลง)'} (EMA 50: $${ema50}, EMA 200: $${ema200})
+คุณคือนักวิเคราะห์การเงินสาย Trend Following โปรดวิเคราะห์สถานการณ์หุ้น ${symbol} (${name}) ใน${marketName}:
+- ราคาปัจจุบัน: ${curr}${price}
+- สัญญาณเทรนด์: ${currentState === 'UPTREND' ? 'Golden Cross (ขาขึ้นรอบใหญ่)' : 'Death Cross (ขาลงรอบใหญ่)'} (EMA 50: ${curr}${ema50}, EMA 200: ${curr}${ema200})
 - หัวข้อข่าวล่าสุด:
-${newsText || "ไม่มีข่าวสำคัญล่าสุด"}
+${newsText || "วิเคราะห์จากปัจจัยพื้นฐานของธุรกิจและแนวโน้มกราฟเทคนิค EMA 50/200"}
 
-คำสั่ง: โปรดสรุปเหตุผลกระชับภาษาไทย 2-3 บรรทัด ว่าทำไมหุ้นถึงเกิดสัญญาณนี้ และนักลงทุนควรจับตาอะไรเป็นพิเศษ (ไม่ต้องมีคำเกริ่น นำเสนอให้อ่านง่าย เหมาะสำหรับอ่านบน Telegram)`;
+คำสั่ง: โปรดสรุปเหตุผลกระชับภาษาไทย 2-3 บรรทัด ว่าทำไมหุ้นถึงอยู่ในเทรนด์นี้ และนักลงทุนควรจับตาปัจจัยอะไรของบริษัทเป็นพิเศษ (ไม่ต้องมีคำเกริ่น นำเสนอให้อ่านง่าย เหมาะสำหรับอ่านบน Telegram และหน้าเว็บ)`;
 
             const result = await model.generateContent(prompt);
             aiSummary = result.response.text().trim();
         } catch (e) {
-            console.log(`⚠️ Gemini AI วิเคราะห์พลาด: ${e.message}`);
+            console.log(`⚠️ Gemini AI วิเคราะห์ ${symbol} พลาด: ${e.message}`);
         }
     }
 
@@ -116,15 +131,27 @@ function calculateEMA(prices, period) {
     return Math.round(ema * 100) / 100;
 }
 
-// เวลาตลาด (21:30 - 03:00 น. เวลาไทย)
-function isMarketOpen() {
+// ⏰ เวลาตลาดแยกตามสัญชาติหุ้น (ไทย SET vs อเมริกา US)
+function isMarketOpen(symbol) {
     const now = new Date();
     const day = now.getUTCDay(); 
     const hour = now.getUTCHours();
     const minute = now.getUTCMinutes();
     const time = hour + (minute / 60);
+    
+    // ปิดเสาร์-อาทิตย์
     if (day === 0 || day === 6) return false;
-    return (time >= 14.5 && time < 20.0);
+
+    if (isThaiStock(symbol)) {
+        // 🇹🇭 เวลาตลาดหุ้นไทย (เวลาไทย 10:00-12:30 และ 14:00-16:30)
+        // แปลงเป็น UTC: 03:00-05:30 และ 07:00-09:30
+        const isMorningOpen = (time >= 3.0 && time <= 5.5);
+        const isAfternoonOpen = (time >= 7.0 && time <= 9.5);
+        return isMorningOpen || isAfternoonOpen;
+    } else {
+        // 🇺🇸 เวลาตลาดอเมริกา (21:30 - 03:00 น. เวลาไทย / UTC 14.5 - 20.0)
+        return (time >= 14.5 && time < 20.0);
+    }
 }
 
 // 🎯 จับเทรนด์รอบใหญ่ด้วย EMA 50 และ EMA 200
@@ -176,16 +203,18 @@ async function fetchStockDataNative(symbol) {
         const chartData = await chartRes.json();
         const result = chartData.chart.result[0];
         
-        currentPrice = result.meta.regularMarketPrice;
+        currentPrice = Math.round((result.meta.regularMarketPrice || 0) * 100) / 100;
         const previousClose = result.meta.chartPreviousClose || currentPrice;
-        changePercent = ((currentPrice - previousClose) / previousClose) * 100;
+        changePercent = previousClose > 0 ? ((currentPrice - previousClose) / previousClose) * 100 : 0;
         
         const closes = result.indicators.quote[0].close || [];
         for (let i = 0; i < closes.length; i++) {
-            if (closes[i] !== null) prices.push(closes[i]);
+            if (closes[i] !== null && closes[i] !== undefined) {
+                prices.push(Math.round(closes[i] * 100) / 100);
+            }
         }
     } catch (e) {
-        console.log(`⚠️ ข้ามกราฟของ ${symbol}`);
+        console.log(`⚠️ ข้ามกราฟของ ${symbol}: ${e.message}`);
     }
 
     let name = symbol;
@@ -205,7 +234,7 @@ async function fetchStockDataNative(symbol) {
         
         if (finData.quoteSummary && finData.quoteSummary.result) {
             const finResult = finData.quoteSummary.result[0];
-            name = finResult.price?.shortName || symbol;
+            name = finResult.price?.shortName || finResult.price?.longName || symbol;
             const marketCap = finResult.price?.marketCap?.raw || 0;
             const totalDebt = finResult.financialData?.totalDebt?.raw || 0;
 
@@ -218,17 +247,36 @@ async function fetchStockDataNative(symbol) {
             }
         }
     } catch (e) {
-        // Fallback
+        // Fallback กรณีดึง quoteSummary ไม่สำเร็จ
+        try {
+            const quoteRes = await fetch(`https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbol}`);
+            const quoteData = await quoteRes.json();
+            const qResult = quoteData.quoteResponse.result[0];
+            name = qResult.shortName || qResult.longName || symbol;
+            const marketCap = qResult.marketCap || 0;
+            if (marketCap > 0) assetsM = (marketCap / 1000000).toFixed(0);
+        } catch (fallbackErr) {}
     }
 
+    const isTH = isThaiStock(symbol);
+
     return {
-        symbol, name, price: currentPrice, change: changePercent,
-        historicalPrices: prices, debtRatio: debtRatioStr, isHalal: isPass
+        symbol,
+        name,
+        market: isTH ? 'TH' : 'US',
+        currency: isTH ? '฿' : '$',
+        price: currentPrice,
+        change: Math.round(changePercent * 100) / 100,
+        historicalPrices: prices,
+        debtRatio: debtRatioStr,
+        totalDebt: debtM,
+        totalAssets: assetsM,
+        isHalal: isPass
     };
 }
 
 async function updateAllStocks() {
-    console.log('🔄 เริ่มสแกนหาเทรนด์รอบใหญ่ (EMA 50 & 200)...');
+    console.log('🔄 เริ่มสแกนหาเทรนด์รอบใหญ่ (EMA 50 & 200) ทั้งตลาด US และ TH...');
     for (let i = 0; i < WATCHLIST.length; i++) {
         const symbol = WATCHLIST[i];
         try {
@@ -237,18 +285,21 @@ async function updateAllStocks() {
             if (data.historicalPrices.length >= 200) {
                 const ema50 = calculateEMA(data.historicalPrices, 50);
                 const ema200 = calculateEMA(data.historicalPrices, 200);
-                
                 const currentState = determineTrendState(ema50, ema200);
                 
+                data.ema50 = ema50;
+                data.ema200 = ema200;
+                data.trend = currentState;
+
                 // 🔹 ดึงสถานะเทรนด์ล่าสุดจาก Database
                 const savedStock = await Stock.findOne({ symbol: symbol });
                 const previousTrend = savedStock ? savedStock.trend : null;
                 
-                // 🌟 [เพิ่มใหม่] ดึงข้อความ AI ตัวเก่ามาเตรียมไว้ก่อน
+                // ดึงข้อความ AI ตัวเก่ามาเตรียมไว้ก่อน
                 let currentAiSummary = savedStock && savedStock.aiSummary ? savedStock.aiSummary : "";
 
                 if (currentState !== 'UNKNOWN') {
-                    // 🔹 ตรวจสอบเงื่อนไขการแจ้งเตือนรอบ (เทรนด์เปลี่ยน)
+                    // กรณีที่ 1: หุ้นเกิดการเปลี่ยนเทรนด์ (ตัดขึ้น Golden Cross หรือ ตัดลง Death Cross)
                     if (previousTrend && currentState !== previousTrend) {
                         let alertTitle = '';
                         if (currentState === 'UPTREND') {
@@ -257,26 +308,32 @@ async function updateAllStocks() {
                             alertTitle = '⚠️ <b>สัญญาณขายจบรอบ (Death Cross)</b>\n<i>เส้น EMA 50 ตัดลงใต้ EMA 200</i>';
                         }
 
-                        if (isMarketOpen() && data.isHalal) {
-                            // 🤖 เรียก AI วิเคราะห์ข่าวสารเบื้องหลัง
-                            console.log(`🤖 กำลังให้ AI อ่านข่าวและวิเคราะห์หุ้น ${symbol}...`);
-                            
-                            // 🌟 [เพิ่มใหม่] รับข้อความ AI ตัวใหม่ล่าสุด
-                            currentAiSummary = await getAIAnalysisAndNews(symbol, currentState, data.price, ema50, ema200);
+                        // เช็คเวลาเปิดตลาดตามสัญชาติหุ้น (US หรือ TH) และต้องผ่านเกณฑ์ฮาลาล
+                        if (isMarketOpen(symbol) && data.isHalal) {
+                            console.log(`🤖 เทรนด์เปลี่ยน! กำลังให้ AI อ่านข่าวและวิเคราะห์หุ้น ${symbol}...`);
+                            currentAiSummary = await getAIAnalysisAndNews(symbol, data.name, currentState, data.price, ema50, ema200);
+
+                            const flag = data.market === 'TH' ? '🇹🇭' : '🇺🇸';
+                            const curr = data.currency;
 
                             const fullMessage = `${alertTitle}\n\n` +
-                                `📌 หุ้น: <b>${symbol}</b> (${data.name})\n` +
-                                `💰 ราคาปัจจุบัน: $${data.price}\n` +
-                                `📊 EMA 50: $${ema50}\n` +
-                                `📈 EMA 200: $${ema200}\n` +
+                                `${flag} หุ้น: <b>${symbol}</b> (${data.name})\n` +
+                                `💰 ราคาปัจจุบัน: ${curr}${data.price}\n` +
+                                `📊 EMA 50: ${curr}${ema50}\n` +
+                                `📈 EMA 200: ${curr}${ema200}\n` +
                                 `🕌 หนี้สิน: ${data.debtRatio}%\n\n` +
-                                `🧠 <b>บทวิเคราะห์ข่าวโดย AI:</b>\n<i>${currentAiSummary}</i>`;
+                                `🧠 <b>บทวิเคราะห์โดย AI:</b>\n<i>${currentAiSummary}</i>`;
 
                             await sendTelegramMessage(fullMessage);
                         }
                     }
+                    // กรณีที่ 2: หุ้นตัวนี้เพิ่งเพิ่มเข้ามาใหม่ ยังไม่เคยมีบทวิเคราะห์ AI ใน Database เลย
+                    else if (!currentAiSummary) {
+                        console.log(`🤖 สร้างบทวิเคราะห์ AI ครั้งแรกสำหรับหุ้น ${symbol} เก็บเข้า Database...`);
+                        currentAiSummary = await getAIAnalysisAndNews(symbol, data.name, currentState, data.price, ema50, ema200);
+                    }
 
-                    // 🌟 [ปรับปรุง] อัปเดตสถานะล่าสุด และบันทึกข้อความ AI ลง Database เสมอเมื่อค่าเปลี่ยน
+                    // 🌟 อัปเดตสถานะล่าสุด และบันทึกข้อความ AI ลง Database เสมอเมื่อค่าเปลี่ยน
                     if (currentState !== previousTrend || currentAiSummary !== (savedStock ? savedStock.aiSummary : "")) {
                         await Stock.updateOne(
                             { symbol: symbol }, 
@@ -286,7 +343,7 @@ async function updateAllStocks() {
                     }
                 }
                 
-                // 🌟 [เพิ่มใหม่] แนบข้อความ AI ใส่เข้าไปใน data เพื่อเตรียมส่งต่อให้หน้าเว็บ
+                // แนบข้อความ AI ใส่เข้าไปใน data เพื่อเตรียมส่งต่อให้หน้าเว็บ
                 data.aiSummary = currentAiSummary;
             }
             
@@ -299,28 +356,43 @@ async function updateAllStocks() {
         await delay(2500); 
     }
     isReady = true;
-    console.log('✅ สแกนเทรนด์เสร็จสิ้น 100%!');
+    console.log('✅ สแกนเทรนด์หุ้น US และ TH เสร็จสิ้น 100%!');
 }
 
-// 🚑 1. ระบบ Health Check รายงานตัวตอน 21:30 น.
-cron.schedule('30 21 * * *', () => {
-    const message = "✅ <b>[Health Check]</b> บอท Trend Following + AI โค้ช ตื่นอยู่ครับ!\nเตรียมพร้อมสแกนตลาดอเมริกา 🇺🇸 📈";
+// 🚑 1. ระบบ Health Check รอบตลาดหุ้นไทย (10:00 น. จันทร์-ศุกร์)
+cron.schedule('0 10 * * 1-5', () => {
+    const message = "✅ <b>[Health Check - ตลาดหุ้นไทย]</b> บอท Trend Following + AI โค้ช ตื่นอยู่ครับ!\nเริ่มสแกนสัญญาณ EMA 50/200 ตลาด SET 🇹🇭 📈";
     sendTelegramMessage(message);
-    console.log("Sent Health Check at 21:30");
+    console.log("Sent TH Market Health Check at 10:00");
 }, {
     scheduled: true,
     timezone: "Asia/Bangkok"
 });
 
-app.get('/', (req, res) => res.send('🚀 Trend Following Bot + AI News Analyst ตื่นอยู่เสมอ!'));
+// 🚑 2. ระบบ Health Check รอบตลาดหุ้นอเมริกา (21:30 น. ทุกวัน)
+cron.schedule('30 21 * * *', () => {
+    const message = "✅ <b>[Health Check - ตลาดหุ้นอเมริกา]</b> บอท Trend Following + AI โค้ช ตื่นอยู่ครับ!\nเตรียมพร้อมสแกนตลาดอเมริกา 🇺🇸 📈";
+    sendTelegramMessage(message);
+    console.log("Sent US Market Health Check at 21:30");
+}, {
+    scheduled: true,
+    timezone: "Asia/Bangkok"
+});
+
+app.get('/', (req, res) => res.send('🚀 Trend Following Bot (US & TH Market) + AI News Analyst ตื่นอยู่เสมอ!'));
 app.get('/api/stocks', (req, res) => { 
-    res.json({ isReady: isReady, data: Object.values(cacheData) }); 
+    res.json({
+        isReady: isReady,
+        progress: initProgress,
+        total: WATCHLIST.length,
+        data: Object.values(cacheData)
+    }); 
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 พร้อมที่พอร์ต ${PORT}`);
-    sendTelegramMessage('🚀 <b>Trend Following Bot (เวอร์ชัน AI โค้ช) สตาร์ทเครื่องแล้ว!</b>\nระบบเชื่อมต่อ Database + AI อ่านข่าวสำเร็จ กำลังสแกนกราฟ...');
+    sendTelegramMessage('🚀 <b>Trend Following Bot (US & TH + AI โค้ช) สตาร์ทเครื่องแล้ว!</b>\nระบบเชื่อมต่อ Database สำเร็จ กำลังสแกนกราฟ EMA 50/200...');
     updateAllStocks(); 
     setInterval(updateAllStocks, 15 * 60 * 1000); 
 });
