@@ -34,13 +34,13 @@ const stockSchema = new mongoose.Schema({
 });
 const Stock = mongoose.model('Stock', stockSchema);
 
-// 🌎 ตะกร้าหุ้นสายรันเทรนด์ (Trend Following): หุ้นสหรัฐฯ (25 ตัว) + หุ้นไทย (11 ตัว)
+// 🌎 ตะกร้าหุ้นสายรันเทรนด์ (Trend Following - BDS-Free Edition): หุ้นสหรัฐฯ/เมกะเทรนด์โลก (25 ตัว) + หุ้นไทย (11 ตัว)
 const WATCHLIST = [
-    // 🇺🇸 หุ้นอเมริกาและ ETF ฮาลาล
+    // 🇺🇸 หุ้นอเมริกา เมกะเทรนด์โลก และ ETF ฮาลาล (ตัด AAPL, MSFT, GOOGL, NVDA, CSCO, CAT ออกแล้ว)
     'HLAL', 'SPUS', 'SPSK', 'UMMA',
-    'AAPL', 'MSFT', 'GOOGL', 'NVDA', 'AVGO', 'TSLA', 'AMD', 'ASML',
-    'ADBE', 'CRM', 'CSCO', 'PCOR', 'CRWD', 'NOW', 'SNPS', 'MELI',
-    'CAT', 'JNJ', 'TXN', 'LLY', 'NVO',
+    'TSM', 'ASML', 'ANET', 'LRCX', 'AVGO', 'TSLA', 'AMD', 'PWR',
+    'ADBE', 'CRM', 'ISRG', 'PCOR', 'CRWD', 'NOW', 'SNPS', 'MELI',
+    'FSLR', 'JNJ', 'TXN', 'LLY', 'NVO',
     // 🇹🇭 หุ้นไทยสายวิ่งตามเทรนด์และพื้นฐานแกร่ง
     'DELTA.BK', 'HANA.BK', 'KCE.BK', 'ADVANC.BK',
     'BH.BK', 'BDMS.BK', 'MEGA.BK',
@@ -53,23 +53,23 @@ const FINANCIAL_FALLBACK = {
     'SPUS':      { name: 'SP Funds S&P 500 Shariah ETF', debtM: 0, assetsM: 920, ratio: '0.0', focus: 'ทิศทางดัชนี S&P 500 กลุ่มหุ้นเติบโตและเทคโนโลยีที่ปลอดหนี้ดอกเบี้ยสูง' },
     'SPSK':      { name: 'SP Funds Dow Jones Global Sukuk ETF', debtM: 0, assetsM: 240, ratio: '0.0', focus: 'ทิศทางอัตราผลตอบแทนพันธบัตรอิสลาม (Sukuk) และนโยบายดอกเบี้ยของธนาคารกลางสหรัฐฯ' },
     'UMMA':      { name: 'Wahed Dow Jones Islamic World ETF', debtM: 0, assetsM: 110, ratio: '0.0', focus: 'แนวโน้มตลาดหุ้นฮาลาลทั่วโลกนอกสหรัฐฯ ทั้งในยุโรปและเอเชียแปซิฟิก' },
-    'AAPL':      { name: 'Apple Inc.', debtM: 106600, assetsM: 3450000, ratio: '3.1', focus: 'ยอดขาย iPhone รุ่นใหม่ การเติบโตของรายได้บริการ App Store และการอัปเกรดฟีเจอร์ Apple Intelligence' },
-    'MSFT':      { name: 'Microsoft Corporation', debtM: 97000, assetsM: 3120000, ratio: '3.1', focus: 'อัตราการเติบโตของระบบคลาวด์ Azure และการใช้งาน Copilot AI ในกลุ่มลูกค้าองค์กร' },
-    'GOOGL':     { name: 'Alphabet Inc.', debtM: 28500, assetsM: 2210000, ratio: '1.3', focus: 'รายได้โฆษณาบน Search/YouTube และการขยายตัวของธุรกิจ Google Cloud และโมเดล Gemini' },
-    'NVDA':      { name: 'NVIDIA Corporation', debtM: 10200, assetsM: 3350000, ratio: '0.3', focus: 'คำสั่งซื้อชิปประมวลผล AI สำหรับ Data Center และการส่งมอบสถาปัตยกรรมชิปรุ่นใหม่' },
-    'AVGO':      { name: 'Broadcom Inc.', debtM: 67500, assetsM: 810000, ratio: '8.3', focus: 'ความต้องการชิปเครือข่าย AI ขั้นสูงและรายได้ซอฟต์แวร์องค์กรจาก VMware' },
-    'TSLA':      { name: 'Tesla Inc.', debtM: 12700, assetsM: 1020000, ratio: '1.2', focus: 'ยอดส่งมอบรถยนต์ไฟฟ้ารายไตรมาส อัตรากำไรขั้นต้น และความคืบหน้าของระบบขับเคลื่อนอัตโนมัติ FSD' },
+    'TSM':       { name: 'Taiwan Semiconductor (TSMC)', debtM: 58000, assetsM: 910000, ratio: '6.4', focus: 'ยอดคำสั่งซื้อชิป AI ขั้นสูงระดับ 3nm/2nm และกำลังการผลิตแพ็กเกจจิ้ง CoWoS สำหรับ Data Center ทั่วโลก' },
+    'ASML':      { name: 'ASML Holding N.V.', debtM: 4900, assetsM: 355000, ratio: '1.4', focus: 'ยอดคำสั่งซื้อเครื่องฉายแสงชิป EUV และ High-NA EUV จากโรงงานผลิตเซมิคอนดักเตอร์ชั้นนำทั่วโลก' },
+    'ANET':      { name: 'Arista Networks Inc.', debtM: 0, assetsM: 118000, ratio: '0.0', focus: 'การขยายตัวของระบบเครือข่าย Cloud Switching ความเร็วสูงสำหรับคลัสเตอร์ AI Data Center' },
+    'LRCX':      { name: 'Lam Research Corporation', debtM: 5000, assetsM: 105000, ratio: '4.8', focus: 'ความต้องการเครื่องจักรผลิตแผ่นเวเฟอร์เซมิคอนดักเตอร์และหน่วยความจำความเร็วสูง HBM สำหรับ AI' },
+    'AVGO':      { name: 'Broadcom Inc.', debtM: 67500, assetsM: 810000, ratio: '8.3', focus: 'ความต้องการชิปเครือข่าย AI ขั้นสูง (Custom AI Accelerators) และรายได้ซอฟต์แวร์องค์กร' },
+    'TSLA':      { name: 'Tesla Inc.', debtM: 12700, assetsM: 1020000, ratio: '1.2', focus: 'ยอดส่งมอบรถยนต์ไฟฟ้ารายไตรมาส ระบบกักเก็บพลังงาน Megapack และความคืบหน้าของระบบขับเคลื่อนอัตโนมัติ FSD' },
     'AMD':       { name: 'Advanced Micro Devices', debtM: 2470, assetsM: 248000, ratio: '1.0', focus: 'การชิงส่วนแบ่งตลาดชิป AI ตระกูล Instinct MI และความต้องการซีพียูเซิร์ฟเวอร์ EPYC' },
-    'ASML':      { name: 'ASML Holding N.V.', debtM: 4900, assetsM: 355000, ratio: '1.4', focus: 'ยอดคำสั่งซื้อเครื่องฉายแสงชิป EUV จากโรงงานผลิตเซมิคอนดักเตอร์ชั้นนำทั่วโลก' },
+    'PWR':       { name: 'Quanta Services Inc.', debtM: 4200, assetsM: 45500, ratio: '9.2', focus: 'เม็ดเงินลงทุนโครงข่ายสายส่งไฟฟ้าอัจฉริยะ (Power Grid) และโรงไฟฟ้าพลังงานสะอาดเพื่อรองรับ Data Center' },
     'ADBE':      { name: 'Adobe Inc.', debtM: 5600, assetsM: 215000, ratio: '2.6', focus: 'การสร้างรายได้จากฟีเจอร์ Generative AI (Firefly) บนแพลตฟอร์ม Creative Cloud' },
     'CRM':       { name: 'Salesforce Inc.', debtM: 11800, assetsM: 285000, ratio: '4.1', focus: 'การเติบโตของแพลตฟอร์ม Agentforce AI และการควบคุมต้นทุนเพิ่มอัตรากำไรจากการดำเนินงาน' },
-    'CSCO':      { name: 'Cisco Systems Inc.', debtM: 31000, assetsM: 232000, ratio: '13.4', focus: 'คำสั่งซื้ออุปกรณ์โครงข่ายสำหรับโครงสร้างพื้นฐาน AI และการควบรวมระบบความปลอดภัย Splunk' },
+    'ISRG':      { name: 'Intuitive Surgical Inc.', debtM: 0, assetsM: 185000, ratio: '0.0', focus: 'ยอดติดตั้งหุ่นยนต์ช่วยผ่าตัดอัจฉริยะ Da Vinci 5 และจำนวนเคสการผ่าตัดทั่วโลกที่เติบโตต่อเนื่อง' },
     'PCOR':      { name: 'Procore Technologies', debtM: 92, assetsM: 10800, ratio: '0.9', focus: 'การขยายฐานลูกค้าบริษัทรับเหมาก่อสร้างรายใหญ่และอัตราการต่ออายุสมาชิกซอฟต์แวร์' },
     'CRWD':      { name: 'CrowdStrike Holdings', debtM: 790, assetsM: 88000, ratio: '0.9', focus: 'การเติบโตของรายได้ประจำรายปี (ARR) ด้านความปลอดภัยไซเบอร์บนระบบคลาวด์ Falcon' },
     'NOW':       { name: 'ServiceNow Inc.', debtM: 2300, assetsM: 205000, ratio: '1.1', focus: 'ยอดสัญญาระบบจัดการเวิร์กโฟลว์อัตโนมัติระดับองค์กรและแพ็กเกจ Now Assist AI' },
     'SNPS':      { name: 'Synopsys Inc.', debtM: 710, assetsM: 82000, ratio: '0.9', focus: 'ความต้องการซอฟต์แวร์ออกแบบชิป (EDA) ที่เพิ่มขึ้นตามความซับซ้อนของชิป AI' },
     'MELI':      { name: 'MercadoLibre Inc.', debtM: 6800, assetsM: 102000, ratio: '6.7', focus: 'ยอดขายอีคอมเมิร์ซและการเติบโตของธุรกรรมการเงินดิจิทัลในภูมิภาคละตินอเมริกา' },
-    'CAT':       { name: 'Caterpillar Inc.', debtM: 38400, assetsM: 185000, ratio: '20.8', focus: 'เม็ดเงินลงทุนโครงสร้างพื้นฐานระดับโลกและความต้องการเครื่องจักรกลหนักและระบบพลังงาน' },
+    'FSLR':      { name: 'First Solar Inc.', debtM: 620, assetsM: 24000, ratio: '2.6', focus: 'ยอดคำสั่งซื้อแผงโซลาร์เซลล์ระดับอุตสาหกรรม (Utility-scale) สำหรับโรงไฟฟ้าพลังงานสะอาดและเทคโนโลยี' },
     'JNJ':       { name: 'Johnson & Johnson', debtM: 36500, assetsM: 378000, ratio: '9.7', focus: 'ยอดขายกลุ่มยารักษาโรคมะเร็ง/ภูมิคุ้มกัน และการเติบโตของอุปกรณ์การแพทย์ MedTech' },
     'TXN':       { name: 'Texas Instruments', debtM: 14100, assetsM: 178000, ratio: '7.9', focus: 'วัฏจักรการฟื้นตัวของคำสั่งซื้อชิปอนาล็อกในกลุ่มอุตสาหกรรมและยานยนต์' },
     'LLY':       { name: 'Eli Lilly and Company', debtM: 31200, assetsM: 760000, ratio: '4.1', focus: 'กำลังการผลิตและยอดขายกลุ่มยารักษาโรคเบาหวานและลดน้ำหนัก Mounjaro และ Zepbound' },
@@ -446,7 +446,7 @@ cron.schedule('30 21 * * *', () => {
     timezone: "Asia/Bangkok"
 });
 
-app.get('/', (req, res) => res.send('🚀 Trend Following Bot (US & TH Market) + AI News Analyst ตื่นอยู่เสมอ!'));
+app.get('/', (req, res) => res.send('🚀 Trend Following Bot (US & TH Market - BDS-Free Edition) + AI News Analyst ตื่นอยู่เสมอ!'));
 app.get('/api/stocks', (req, res) => { 
     res.json({
         isReady: isReady,
@@ -459,7 +459,7 @@ app.get('/api/stocks', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 พร้อมที่พอร์ต ${PORT}`);
-    sendTelegramMessage('🚀 <b>Trend Following Bot (US & TH + AI โค้ช) อัปเดตระบบงบการเงินสำเร็จ!</b>\nกำลังซิงค์ข้อมูลและบทวิเคราะห์ใหม่...');
+    sendTelegramMessage('🚀 <b>Trend Following Bot (US & TH + AI โค้ช) อัปเดตตะกร้าหุ้นใหม่ (BDS-Free & Global Megatrends) สำเร็จ!</b>\nกำลังซิงค์ข้อมูลและบทวิเคราะห์ใหม่...');
     updateAllStocks(); 
     setInterval(updateAllStocks, 15 * 60 * 1000); 
 });
